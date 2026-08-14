@@ -1,0 +1,36 @@
+{
+  "communities": {
+    "0": [
+      "2_update_3_identifier_column",
+      "2_update_3_identifier_column_clean_cluster"
+    ],
+    "1": [
+      "1_point_update_and_find"
+    ],
+    "2": [
+      "3_update_rds_outlet_id"
+    ],
+    "3": [
+      "4_update_rds_route_id"
+    ],
+    "4": [
+      "5_update_composite_cluster_route_id"
+    ]
+  },
+  "cohesion": {
+    "0": 1.0,
+    "1": 1.0,
+    "2": 1.0,
+    "3": 1.0,
+    "4": 1.0
+  },
+  "gods": [],
+  "surprises": [],
+  "questions": [
+    {
+      "type": "no_signal",
+      "question": null,
+      "why": "Not enough signal to generate questions. This usually means the corpus has no AMBIGUOUS edges, no bridge nodes, no INFERRED relationships, and all communities are tightly cohesive. Add more files or run with --mode deep to extract richer edges."
+    }
+  ]
+}
