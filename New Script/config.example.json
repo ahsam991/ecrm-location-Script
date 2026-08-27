@@ -1,0 +1,12 @@
+{
+  "old_file": "data/retailers_02_05_2026_update.csv",
+  "new_file": "data/retailers_05_07_2026.csv",
+  "output_file": "data/retailers_05_07_2026_update.csv",
+  "save_dir": "finded_data",
+  "table": "ecrm.locations",
+  "db_host": "localhost",
+  "db_port": 5432,
+  "db_name": "",
+  "db_user": "",
+  "db_password": ""
+}

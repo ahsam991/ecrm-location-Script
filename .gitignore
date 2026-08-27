@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.venv/
+venv/
+
+# Runtime data & outputs (never commit real extracts or generated reports)
+data/
+config.json
+context_memory.json
+*.log
+
+# Generated graph-analysis cache
+graphify-out/
+
+# Old run produced truncated report files; regenerate rather than commit
+Old Ref/finded_data/missing_*.csv
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
