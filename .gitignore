@@ -14,9 +14,6 @@ context_memory.json
 # Generated graph-analysis cache
 graphify-out/
 
-# Old run produced truncated report files; regenerate rather than commit
-Old Ref/finded_data/missing_*.csv
-
 # OS / editor
 Thumbs.db
 .DS_Store
