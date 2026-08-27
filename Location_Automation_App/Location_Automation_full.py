@@ -2,7 +2,7 @@
 Migration pipeline.
 
 This file is fully self-contained. It bundles the Config, all migration
-helpers, the ContextMemory, and the PySide6 glass GUI. Run it directly:
+helpers, and the PySide6 glass GUI. Run it directly:
 
     python Location_Automation_full.py
 
@@ -18,14 +18,11 @@ import os
 import re
 import subprocess
 import sys
-import time
 from dataclasses import dataclass, field, asdict
-from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Optional
 
 SCRIPT_DIR = Path(__file__).resolve().parent
-MEMORY_FILE = SCRIPT_DIR / "context_memory.json"
 REQUIRED = [("pandas", "pandas"), ("psycopg2", "psycopg2-binary"), ("PySide6", "PySide6")]
 STAGE_ORDER = ["point", "key", "route", "cluster", "outlet"]
 STAGE_SHORT = {"point": "Point", "key": "Keys", "route": "Route",
@@ -460,56 +457,6 @@ def setup_logging(level: int = logging.INFO) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Context memory
-# --------------------------------------------------------------------------- #
-class ContextMemory:
-    def __init__(self, path: Path = MEMORY_FILE):
-        self.path = Path(path)
-        self.data: dict = {"nodes": [], "edges": [], "notes": "", "runs": [], "updated": ""}
-        self.load()
-
-    def load(self) -> None:
-        try:
-            if self.path.exists():
-                raw = json.loads(self.path.read_text(encoding="utf-8"))
-                if isinstance(raw, dict):
-                    self.data.update(raw)
-        except Exception:
-            pass
-
-    def save(self) -> None:
-        self.data["updated"] = datetime.now().isoformat(timespec="seconds")
-        self.path.write_text(json.dumps(self.data, indent=2, default=str), encoding="utf-8")
-
-    def add_node(self, node_id: str, node_type: str, label: str, props: dict) -> None:
-        nodes = self.data.setdefault("nodes", [])
-        for n in nodes:
-            if n["id"] == node_id:
-                n.update({"type": node_type, "label": label, "props": props}); return
-        nodes.append({"id": node_id, "type": node_type, "label": label, "props": props})
-
-    def add_edge(self, source: str, target: str, rel: str) -> None:
-        edges = self.data.setdefault("edges", [])
-        for e in edges:
-            if (e["source"], e["target"], e["rel"]) == (source, target, rel):
-                return
-        edges.append({"source": source, "target": target, "rel": rel})
-
-    def remember_run(self, stats: dict, context: dict) -> int:
-        self.data.setdefault("runs", []).append({
-            "at": datetime.now().isoformat(timespec="seconds"), "stats": stats, "context": context,
-        })
-        self.data["runs"] = self.data["runs"][-20:]
-        self.save()
-        return len(self.data["runs"])
-
-    def summary(self) -> str:
-        nodes = self.data.get("nodes", []); runs = self.data.get("runs", [])
-        return (f"{len(nodes)} saved node(s), {len(runs)} saved run(s).\n"
-                f"Last updated: {self.data.get('updated', 'never')}")
-
-
-# --------------------------------------------------------------------------- #
 # Dependency gate
 # --------------------------------------------------------------------------- #
 def _import_name(pip: str) -> str:
@@ -717,7 +664,6 @@ def run_app() -> int:
             self.setWindowFlags(Qt.FramelessWindowHint | Qt.Window)
             self.setAttribute(Qt.WA_TranslucentBackground)
             self.resize(1120, 760)
-            self.memory = ContextMemory()
             self.stats = {}
             self.cfg = load_config()
             self._drag = None
@@ -757,17 +703,26 @@ def run_app() -> int:
             sv = QVBoxLayout(side); sv.setContentsMargins(14, 18, 14, 18)
             self.nav = []
             for key, lbl in (("setup", "Setup"), ("run", "Run"), ("visual", "Visuals"),
-                             ("memory", "Memory"), ("log", "Log")):
+                             ("log", "Log")):
                 b = self._btn(lbl); b.clicked.connect(lambda c=False, k=key: self.switch(k))
                 sv.addWidget(b); self.nav.append((key, b))
             sv.addStretch(1); body.addWidget(side)
             self.stack = QStackedWidget()
             self._page_setup(); self._page_run(); self._page_visual()
-            self._page_memory(); self._page_log()
+            self._page_log()
             body.addWidget(self.stack, 1); outer.addLayout(body, 1)
             outer.addWidget(QSizeGrip(self))
             lo = QVBoxLayout(self); lo.setContentsMargins(0, 0, 0, 0); lo.addWidget(root)
             self.switch("run")
+
+        def _small(self, text="⋯"):
+            b = QPushButton(text)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFixedSize(42, 34)
+            b.setStyleSheet("QPushButton{background:rgba(120,160,255,120);color:#e8ecff;border:none;"
+                            "border-radius:8px;font:15px 'Segoe UI';}"
+                            "QPushButton:hover{background:rgba(160,190,255,170);}")
+            return b
 
         def _page_setup(self):
             panel = GlassPanel(); lay = QVBoxLayout(panel); lay.setContentsMargins(22, 22, 22, 22)
@@ -779,12 +734,17 @@ def run_app() -> int:
             self.i_save = QLineEdit(self.cfg.save_dir)
             self.i_table = QLineEdit(self.cfg.table)
             grid = QGridLayout()
-            for i, (lab, w) in enumerate((("Old mapped file", self.i_old), ("New fresh extract", self.i_new),
-                                          ("Output file", self.i_out), ("Reports dir", self.i_save),
-                                          ("Table", self.i_table))):
-                grid.addWidget(self._lbl(lab), i, 0); grid.addWidget(w, i, 1)
+            rows = (("Old mapped file", self.i_old, self._browse_old),
+                    ("New fresh extract", self.i_new, self._browse_new),
+                    ("Output file", self.i_out, self._browse_out),
+                    ("Reports dir", self.i_save, self._browse_save),
+                    ("Table", self.i_table, None))
+            for i, (lab, w, fn) in enumerate(rows):
+                grid.addWidget(self._lbl(lab), i, 0)
+                grid.addWidget(w, i, 1)
+                if fn:
+                    bb = self._small(); bb.clicked.connect(fn); grid.addWidget(bb, i, 2)
             grid.setColumnStretch(1, 1); lay.addLayout(grid)
-            b = self._btn("Browse..."); b.clicked.connect(self._browse); lay.addWidget(b, 0, Qt.AlignLeft)
             lay.addWidget(self._lbl("PostgreSQL (used only when 'Write to DB' is on)", 12, "#eef2ff", True))
             self.i_host, self.i_port, self.i_name, self.i_user, self.i_pwd = (
                 QLineEdit(), QLineEdit(), QLineEdit(), QLineEdit(), QLineEdit())
@@ -799,7 +759,9 @@ def run_app() -> int:
                 gd.addWidget(self._lbl(lab), i, 0); gd.addWidget(w, i, 1)
             lay.addLayout(gd)
             hb = QHBoxLayout()
-            hb.addWidget(self._btn("Save config.json", True)); hb.addWidget(self._btn("Load config.json"))
+            save_b = self._btn("Save config.json", True); save_b.clicked.connect(self._save_cfg)
+            load_b = self._btn("Load config.json"); load_b.clicked.connect(self._load_cfg)
+            hb.addWidget(save_b); hb.addWidget(load_b)
             lay.addLayout(hb); lay.addStretch(1)
             self.stack.addWidget(panel)
 
@@ -838,32 +800,6 @@ def run_app() -> int:
             self.chart = BarChart(); lay.addWidget(self.chart, 1)
             self.stack.addWidget(panel)
 
-        def _page_memory(self):
-            panel = GlassPanel(); s = QScrollArea(); s.setWidgetResizable(True)
-            body = QWidget(); lay = QVBoxLayout(body); lay.setContentsMargins(4, 4, 4, 4)
-            lay.addWidget(self._lbl("Context Memory (Graphify-style)", 16, "#eef2ff", True))
-            self.mem_summary = self._lbl(self.memory.summary()); lay.addWidget(self.mem_summary)
-            lay.addWidget(self._lbl("Notes (persisted):", 12, "#c8d3ff"))
-            self.mem_notes = QTextEdit(); self.mem_notes.setPlainText(self.memory.data.get("notes", ""))
-            self.mem_notes.setMinimumHeight(180)
-            self.mem_notes.setStyleSheet("background:rgba(255,255,255,26);color:#eef2ff;border:none;"
-                                         "border-radius:12px;font:12px 'Segoe UI';padding:10px;")
-            lay.addWidget(self.mem_notes)
-            lay.addWidget(self._lbl("Saved runs:", 12, "#c8d3ff"))
-            self.runs_list = QTextEdit(); self.runs_list.setReadOnly(True)
-            self.runs_list.setPlainText("\n".join(json.dumps(r.get("stats", {}))
-                                                  for r in self.memory.data.get("runs", [])[-10:]))
-            self.runs_list.setMaximumHeight(150)
-            self.runs_list.setStyleSheet("background:rgba(255,255,255,26);color:#dfe6ff;border:none;"
-                                         "border-radius:12px;font:11px 'Consolas';padding:10px;")
-            lay.addWidget(self.runs_list)
-            hb = QHBoxLayout(); hb.addWidget(self._btn("Save memory", True))
-            hb.addWidget(self._btn("Clear runs"))
-            lay.addLayout(hb); lay.addStretch(1)
-            s.setWidget(body)
-            outer = QVBoxLayout(panel); outer.setContentsMargins(22, 22, 22, 22); outer.addWidget(s)
-            self.stack.addWidget(panel)
-
         def _page_log(self):
             panel = GlassPanel(); lay = QVBoxLayout(panel); lay.setContentsMargins(22, 22, 22, 22)
             lay.addWidget(self._lbl("Log", 16, "#eef2ff", True))
@@ -875,14 +811,58 @@ def run_app() -> int:
             clr = self._btn("Clear log"); clr.clicked.connect(lambda: self.log_text.clear()); h.addWidget(clr)
             lay.addLayout(h); self.stack.addWidget(panel)
 
-        def _browse(self):
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk(); root.withdraw()
-            p = filedialog.askopenfilename()
-            root.destroy()
+        def _browse_old(self):
+            p, _ = QFileDialog.getOpenFileName(self, "Select old mapped file",
+                                               os.path.dirname(self.i_old.text()) or str(BASE_DIR))
             if p:
-                self.i_new.setText(p); self.i_out.setText(p.rsplit(".", 1)[0] + "_update.csv")
+                self.i_old.setText(p)
+
+        def _browse_new(self):
+            p, _ = QFileDialog.getOpenFileName(self, "Select new fresh extract",
+                                               os.path.dirname(self.i_new.text()) or str(BASE_DIR))
+            if p:
+                self.i_new.setText(p)
+                default_out = "data/retailers_05_07_2026_update.csv"
+                if self.i_out.text().strip() in ("", default_out):
+                    base, ext = os.path.splitext(p)
+                    self.i_out.setText(base + "_update" + ext)
+
+        def _browse_out(self):
+            p, _ = QFileDialog.getSaveFileName(self, "Select output file",
+                                               self.i_out.text() or str(BASE_DIR))
+            if p:
+                self.i_out.setText(p)
+
+        def _browse_save(self):
+            d = QFileDialog.getExistingDirectory(self, "Select reports directory",
+                                                 self.i_save.text() or str(BASE_DIR))
+            if d:
+                self.i_save.setText(d)
+
+        def _save_cfg(self):
+            try:
+                cfg = self._collect_cfg()
+                CONFIG_FILE.write_text(json.dumps(asdict(cfg), indent=2, default=str), encoding="utf-8")
+                self._set_status(f"Config saved -> {CONFIG_FILE}")
+            except Exception as exc:
+                self._set_status(f"Config save failed: {exc}")
+
+        def _load_cfg(self):
+            try:
+                self.cfg = load_config()
+                self.i_old.setText(self.cfg.old_file)
+                self.i_new.setText(self.cfg.new_file)
+                self.i_out.setText(self.cfg.output_file)
+                self.i_save.setText(self.cfg.save_dir)
+                self.i_table.setText(self.cfg.table)
+                self.i_host.setText(self.cfg.db_host or "localhost")
+                self.i_port.setText(str(self.cfg.db_port or 5432))
+                self.i_name.setText(self.cfg.db_name)
+                self.i_user.setText(self.cfg.db_user)
+                self.i_pwd.setText(self.cfg.db_password)
+                self._set_status(f"Config loaded from {CONFIG_FILE}")
+            except Exception as exc:
+                self._set_status(f"Config load failed: {exc}")
 
         def _collect_cfg(self):
             c = Config()
@@ -905,7 +885,6 @@ def run_app() -> int:
             dry = self.c_dry.isChecked(); write = self.c_write.isChecked() and not dry
             cfg = self._collect_cfg()
             opts = Opts(dry_run=dry, write_db=write, write_csv=not dry, conn=None, save_dir=cfg.save_path)
-            self.memory.add_node("cfg", "config", "Configuration", {"files": cfg.old_file})
             context = {k: getattr(cfg, k) for k in ("old_file", "new_file", "output_file", "table")}
             mk = {"cfg": cfg, "opts": opts, "stages": stages, "context": context}
             self.thread = QThread(); self.worker = Worker(mk)
@@ -922,12 +901,6 @@ def run_app() -> int:
 
         def _on_done(self, stats, context):
             self.stats = stats; self.chart.set_stats(stats)
-            self.memory.remember_run(stats, context)
-            self.memory.data["notes"] = self.mem_notes.toPlainText()
-            self.memory.save()
-            self.runs_list.setPlainText("\n".join(json.dumps(r.get("stats", {}))
-                                                  for r in self.memory.data.get("runs", [])[-10:]))
-            self.mem_summary.setText(self.memory.summary())
             self.run_progress.setRange(0, 100); self.run_progress.setValue(100)
             self._set_status("Done."); self.btn_run.setEnabled(True); self.btn_stop.setEnabled(False)
 
@@ -942,7 +915,7 @@ def run_app() -> int:
                 self.thread.requestInterruption(); self._set_status("Stopped.")
 
         def switch(self, key):
-            idx = ["setup", "run", "visual", "memory", "log"].index(key)
+            idx = ["setup", "run", "visual", "log"].index(key)
             self.stack.setCurrentIndex(idx)
             for k, b in self.nav:
                 b.setStyleSheet(
